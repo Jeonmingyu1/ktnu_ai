@@ -377,7 +377,7 @@ elif st.session_state["active_tab_index"] == 2:
     c3.metric("학습 상태", "🎯 합격권" if avg >= 60 else "⚠️ 보완 필요")
 
     st.divider()
-    st.subheader("🚨 파트별 성적 분석 및 취약 파트 공부 추천")
+    st.subheader("🚨 파트별 성적 분석 및 취약 챕터 파트 공부 추천")
 
     major_stats = (
         res_df.groupby("대단원")
@@ -388,15 +388,15 @@ elif st.session_state["active_tab_index"] == 2:
 
     for idx, row in weak_majors.iterrows():
       col_info, col_btn = st.columns([3, 1])
+      major_val = row["대단원"]
       with col_info:
         st.markdown(
-            f"- 📂 **파트: [{row['대단원 ' if '대단원 ' in row else '대단원'}]**"
-            f" (풀이: {row['풀이횟수']}회, 평균 점수:"
+            f"- 📂 **파트: [{major_val}]** (풀이: {row['풀이횟수']}회, 평균 점수:"
             f" **{row['평균점수']:.1f}점**)"
         )
       with col_btn:
         if st.button(f"🎯 집중 공략", key=f"focus_btn_{idx}", type="primary"):
-          st.session_state["target_weak_major"] = row["대단원"]
+          st.session_state["target_weak_major"] = major_val
           st.session_state["scope_mode"] = "🚨 취약 파트 공부"
           st.session_state["active_tab_index"] = 0
           if "batch_exam_df" in st.session_state:
