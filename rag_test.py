@@ -6,7 +6,7 @@ from google import genai
 
 # 1. 페이지 설정
 st.set_page_config(
-    page_title="건축기사 RAG 학습 및 채점 시스템 (최종본)",
+    page_title="건축기사 RAG 학습 및 채점 시스템",
     layout="wide",
 )
 
@@ -38,27 +38,18 @@ def load_and_vectorize_data():
   if collection.count() == 0:
     try:
       df = pd.read_csv("architectural_exam.csv")
+      df.columns = df.columns.str.strip()
     except FileNotFoundError:
-      df = pd.DataFrame({
-          "question": [
-              "피복두께의 목적에 대해 쓰시오",
-              "BOT 방식을 설명하시오.",
-          ],
-          "answer": [
-              "내화 확보 및 철근 부식 방지",
-              "민간이 시설을 짓고 운영한 뒤 국가에 양도",
-          ],
-          "explanation": [
-              (
-                  "피복두께는 콘크리트 중성화 방지 및 내화성 유지를 위해"
-                  " 필요합니다."
-              ),
-              "Social Infrastructure 사업에 주로 쓰입니다.",
-          ],
-      })
+      st.error("architectural_exam.csv 파일이 없습니다!")
+      st.stop()
 
+    # 실제 CSV 컬럼명인 'question'과 'answer' 사용
     documents = (
-        df["question"] + " " + df["answer"] + " " + df["explanation"]
+        df["question"].fillna("")
+        + " "
+        + df["answer"].fillna("")
+        + " "
+        + df.get("category", "").fillna("")
     ).tolist()
     ids = [str(i) for i in range(len(df))]
     metadatas = df.to_dict(orient="records")
@@ -92,11 +83,11 @@ if menu == "문제 풀기 & AI 채점":
   st.subheader("📝 주관식 서술형 문제 풀이 및 채점")
 
   user_question = st.text_input(
-      "풀고 싶은 문제 키워드나 질문을 입력하세요:", "피복두께의 목적"
+      "풀고 싶은 문제 키워드나 질문을 입력하세요:", "BOT 방식"
   )
   user_answer = st.text_area(
       "작성한 답안을 입력하세요:",
-      "철근 부식 방지와 내화성 확보를 위해서입니다.",
+      "민간이 시설을 짓고 운영한 뒤 국가에 양도하는 방식입니다.",
   )
 
   if st.button("AI 채점 요청하기"):
@@ -116,16 +107,23 @@ if menu == "문제 풀기 & AI 채점":
           if search_results["documents"]
           else "관련 정보 없음"
       )
+      metadata = (
+          search_results["metadatas"][0][0]
+          if search_results["metadatas"]
+          else {}
+      )
+
+      correct_answer = metadata.get("answer", "정보 없음")
 
       # AI 채점 프롬프트 실행
       prompt = f"""
             당신은 엄격하고 공정한 건축기사 실기 시험 채점위원입니다.
-            아래의 [참고 교재 내용]을 바탕으로 [학생의 답안]을 평가하고 점수를 매기세요.
+            아래의 [모범 정답 및 교재 내용]을 바탕으로 [학생의 답안]을 평가하고 점수를 매기세요.
 
-            [참고 교재 내용]:
-            {retrieved_context}
+            [모범 정답 및 참고 내용]:
+            {correct_answer}
 
-            [학생의 질문]: {user_question}
+            [학생의 질문/문제]: {user_question}
             [학생의 답안]: {user_answer}
 
             [채점 루브릭 기준]:
@@ -154,7 +152,8 @@ if menu == "문제 풀기 & AI 채점":
 elif menu == "의미 기반 RAG 검색 테스트":
   st.subheader("🔎 의미 기반(Semantic) 벡터 검색 검증")
   query_text = st.text_input(
-      "검색할 내용을 입력하세요 (오타나 평소 말투 가능):", "철근 부식 막는 이유"
+      "검색할 내용을 입력하세요 (오타나 평소 말투 가능):",
+      "민간이 시설 짓고 국가에 넘기는 계약",
   )
   if st.button("문서 검색"):
     q_embed = client.models.embed_content(
