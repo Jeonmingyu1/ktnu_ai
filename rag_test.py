@@ -4,13 +4,12 @@ import pandas as pd
 import streamlit as st
 from google import genai
 
-# 1. [가장 첫 줄 필수] 페이지 설정 (다른 어떤 st.* 명령어나 출력보다 먼저 와야 합니다)
+# [필수] 다른 어떤 코드보다 가장 첫 줄에 위치해야 합니다.
 st.set_page_config(
-    page_title="건축기사 RAG 학습 및 채점 시스템",
-    page_layout="wide",
+    page_title="건축기사 RAG 학습 및 채점 시스템", page_layout="wide"
 )
 
-# 2. Streamlit Secrets에서 Gemini API 키 안전하게 불러오기
+# Secrets에서 API 키 로드
 try:
   GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
@@ -23,11 +22,11 @@ except Exception:
 # 제미나이 클라이언트 초기화
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# 3. ChromaDB 영구 저장소 설정
+
+# ChromaDB 영구 저장소 설정
 @st.cache_resource
 def init_chroma():
-  chroma_client = chromadb.PersistentClient(path="./chroma_db")
-  return chroma_client
+  return chromadb.PersistentClient(path="./chroma_db")
 
 
 chroma_client = init_chroma()
@@ -36,7 +35,7 @@ collection = chroma_client.get_or_create_collection(
 )
 
 
-# 4. 데이터 로드 및 벡터 DB 적재 함수
+# 데이터 적재 함수
 def load_and_vectorize_data():
   if collection.count() == 0:
     try:
@@ -44,7 +43,6 @@ def load_and_vectorize_data():
       documents = df["question"] + " " + df["answer"] + " " + df["explanation"]
       ids = [str(i) for i in range(len(df))]
       metadatas = df.to_dict(orient="records")
-
       collection.add(
           documents=documents.tolist(), ids=ids, metadatas=metadatas
       )
@@ -68,19 +66,17 @@ def load_and_vectorize_data():
 
 load_and_vectorize_data()
 
-# 5. UI 화면 구성
+# 메인 UI
 st.title("🏗️ 건축기사 실기 RAG 학습 및 자동 채점 시스템")
 st.write(
     "딥러닝 임베딩과 RAG 기술을 활용하여 기출문제를 검색하고, 객관적인 루브릭에"
     " 따라 답안을 채점합니다."
 )
 
-# 사이드바 메뉴
 menu = st.sidebar.selectbox("선택 메뉴", ["문제 풀기 & AI 채점", "RAG 검색 테스트"])
 
 if menu == "문제 풀기 & AI 채점":
   st.subheader("📝 주관식 서술형 문제 풀이 및 채점")
-
   user_question = st.text_input(
       "풀고 싶은 문제 키워드나 질문을 입력하세요:", "피복두께의 목적에 대해 쓰시오"
   )
@@ -123,8 +119,7 @@ if menu == "문제 풀기 & AI 채점":
             """
 
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
-          contents=prompt,
+          model="gemini-2.5-flash", contents=prompt
       )
 
       st.markdown("### 📊 채점 결과")
