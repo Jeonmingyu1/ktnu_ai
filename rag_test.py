@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# 2. API 키 설정
+# 2. API 키 설정 (채점 및 답변 생성용)
 try:
   GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
@@ -19,20 +19,22 @@ except Exception:
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# 3. ChromaDB 초기화
+
+# 3. ChromaDB 초기화 (내장 임베딩 활용으로 API 에러 원천 차단)
 @st.cache_resource
 def init_chroma():
   chroma_client = chromadb.PersistentClient(path="./chroma_db_final")
-  return chroma_client
+  # ChromaDB 기본 임베딩 모델 사용 (추가 API 호출 없이 안정적으로 동작)
+  collection = chroma_client.get_or_create_collection(
+      name="architectural_exam_semantic"
+  )
+  return chroma_client, collection
 
 
-chroma_client = init_chroma()
-collection = chroma_client.get_or_create_collection(
-    name="architectural_exam_semantic"
-)
+chroma_client, collection = init_chroma()
 
 
-# 4. 딥러닝 임베딩 안전 적재 함수 (문단별 순차 처리로 에러 방지)
+# 4. 데이터 적재 함수
 @st.cache_resource
 def load_and_vectorize_data():
   if collection.count() == 0:
@@ -53,31 +55,20 @@ def load_and_vectorize_data():
     ids = [str(i) for i in range(len(df))]
     metadatas = df.to_dict(orient="records")
 
-    # 💡 에러 방지를 위해 하나씩 안전하게 딥러닝 임베딩 추출
-    embeddings = []
-    for doc in documents:
-      response = client.models.embed_content(
-          model="text-embedding-004", contents=doc
-      )
-      embeddings.append(response.embeddings[0].values)
-
-    # ChromaDB에 임베딩 벡터 저장
-    collection.add(
-        embeddings=embeddings, documents=documents, ids=ids, metadatas=metadatas
-    )
+    # ChromaDB가 자동으로 텍스트를 벡터화하여 저장
+    collection.add(documents=documents, ids=ids, metadatas=metadatas)
 
 
 load_and_vectorize_data()
 
 # 5. UI 화면 구성
-st.title("🏗️ 건축기사 실기 딥러닝 RAG 학습 및 자동 채점 시스템")
+st.title("🏗️ 건축기사 실기 RAG 학습 및 자동 채점 시스템")
 st.write(
-    "구글 `text-embedding-004` 딥러닝 모델과 ChromaDB 벡터 검색을 결합한"
-    " 완전한 의미 기반(Semantic Search) 시스템입니다."
+    "ChromaDB 벡터 검색과 제미나이 AI 채점을 결합한 의미 기반 시스템입니다."
 )
 
 menu = st.sidebar.selectbox(
-    "선택 메뉴", ["문제 풀기 & AI 채점", "의미 기반 RAG 검색 테스트"]
+    "선택 메뉴", ["문제 풀기 & AI 채점", "RAG 검색 테스트"]
 )
 
 if menu == "문제 풀기 & AI 채점":
@@ -92,16 +83,9 @@ if menu == "문제 풀기 & AI 채점":
   )
 
   if st.button("AI 채점 요청하기"):
-    with st.spinner("딥러닝 임베딩으로 교재를 의미 기반 검색 중..."):
-      # 사용자 질문을 딥러닝 벡터로 변환
-      query_embedding = client.models.embed_content(
-          model="text-embedding-004", contents=user_question
-      ).embeddings[0].values
-
-      # 벡터 데이터베이스에서 가장 유사한 문서 검색
-      search_results = collection.query(
-          query_embeddings=[query_embedding], n_results=1
-      )
+    with st.spinner("RAG로 교재를 검색하고 정밀 채점 중입니다..."):
+      # ChromaDB 벡터 검색 실행 (의미 기반 유사 문서 탐색)
+      search_results = collection.query(query_texts=[user_question], n_results=1)
 
       retrieved_context = (
           search_results["documents"][0][0]
@@ -150,16 +134,12 @@ if menu == "문제 풀기 & AI 채점":
       with st.expander("🔍 RAG 검색에 활용된 교재 원문 확인"):
         st.write(retrieved_context)
 
-elif menu == "의미 기반 RAG 검색 테스트":
-  st.subheader("🔎 의미 기반(Semantic) 벡터 검색 검증")
+elif menu == "RAG 검색 테스트":
+  st.subheader("🔎 벡터 검색 검증")
   query_text = st.text_input(
       "검색할 내용을 입력하세요 (오타나 평소 말투 가능):",
       "민간이 시설 짓고 국가에 넘기는 계약",
   )
   if st.button("문서 검색"):
-    q_embed = client.models.embed_content(
-        model="text-embedding-004", contents=query_text
-    ).embeddings[0].values
-
-    results = collection.query(query_embeddings=[q_embed], n_results=2)
+    results = collection.query(query_texts=[query_text], n_results=2)
     st.write("검색된 관련 문서:", results["documents"])
