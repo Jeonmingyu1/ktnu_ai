@@ -2,9 +2,9 @@ import os
 import chromadb
 import pandas as pd
 import streamlit as st
-from google import genai  # 최신 구글 제미나이 SDK 기준
+from google import genai
 
-# 1. 페이지 설정
+# 1. [가장 첫 줄 필수] 페이지 설정 (다른 어떤 st.* 명령어나 출력보다 먼저 와야 합니다)
 st.set_page_config(
     page_title="건축기사 RAG 학습 및 채점 시스템",
     page_layout="wide",
@@ -23,10 +23,9 @@ except Exception:
 # 제미나이 클라이언트 초기화
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# 3. ChromaDB 영구 저장소 설정 (서버에 데이터가 날아가지 않고 저장됨)
+# 3. ChromaDB 영구 저장소 설정
 @st.cache_resource
 def init_chroma():
-  # 로컬 폴더에 'chroma_db'라는 영구 저장소 생성
   chroma_client = chromadb.PersistentClient(path="./chroma_db")
   return chroma_client
 
@@ -39,10 +38,8 @@ collection = chroma_client.get_or_create_collection(
 
 # 4. 데이터 로드 및 벡터 DB 적재 함수
 def load_and_vectorize_data():
-  # 만약 컬렉션에 데이터가 없다면 엑셀/CSV에서 읽어와서 적재
   if collection.count() == 0:
     try:
-      # 건축기사 기출 데이터 파일 경로 (상황에 맞게 이름 수정 가능)
       df = pd.read_csv("architectural_exam.csv")
       documents = df["question"] + " " + df["answer"] + " " + df["explanation"]
       ids = [str(i) for i in range(len(df))]
@@ -51,8 +48,7 @@ def load_and_vectorize_data():
       collection.add(
           documents=documents.tolist(), ids=ids, metadatas=metadatas
       )
-    except Exception as e:
-      # 파일이 없을 경우를 대비한 더미 데이터 (에러 방지용)
+    except Exception:
       sample_docs = [
           "철근콘크리트 구조의 피복두께는 철근의 부식을 방지하고 내화를 확보하기 위함이다.",
           "네트워크 공정표에서 주공정선(Critical Path)은 전체 공사 기간을 결정하는 최장 경로이다.",
@@ -95,7 +91,6 @@ if menu == "문제 풀기 & AI 채점":
 
   if st.button("AI 채점 요청하기"):
     with st.spinner("RAG로 교재를 검색하고 정밀 채점 중입니다..."):
-      # [RAG 검색 단계] 질문과 가장 유사한 데이터 검색
       search_results = collection.query(
           query_texts=[user_question], n_results=1
       )
@@ -105,7 +100,6 @@ if menu == "문제 풀기 & AI 채점":
           else "관련 정보 없음"
       )
 
-      # [AI 채점 프롬프트 + 루브릭 적용]
       prompt = f"""
             당신은 엄격하고 공정한 건축기사 실기 시험 채점위원입니다.
             아래의 [참고 교재 내용]을 바탕으로 [학생의 답안]을 평가하고 점수를 매기세요.
@@ -128,9 +122,8 @@ if menu == "문제 풀기 & AI 채점":
             3. 모범 답안:
             """
 
-      # 최신 gemini 클라이언트를 이용한 답변 생성
       response = client.models.generate_content(
-          model="gemini-3.6-flash",  # 또는 gemini-1.5-pro
+          model="gemini-2.5-flash",
           contents=prompt,
       )
 
