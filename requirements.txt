@@ -1,5 +1,6 @@
 streamlit
 pandas
+openpyxl
 chromadb
-sentence-transformers
 google-genai
+openpyxl
