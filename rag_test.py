@@ -122,7 +122,7 @@ if menu == "문제 풀기 & AI 채점":
             """
 
       response = client.models.generate_content(
-          model="gemini-2.5-flash", contents=prompt
+          model="gemini-3.6-flash", contents=prompt
       )
 
       st.markdown("### 📊 채점 결과")
