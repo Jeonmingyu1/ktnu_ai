@@ -1,16 +1,4 @@
 import os
-import chromadb
-import pandas as pd
-import streamlit as st
-from google import genai
-
-# set_page_config 중복/순서 에러 방지용 안전 장치
-try:
-  st.set_page_config(
-      page_title="건축기사 RAG 학습 및 채점 시스템", page_layout="wide"
-  )
-except Exception:
-  passimport os
 import re
 import csv
 import chromadb
@@ -18,23 +6,23 @@ import pandas as pd
 import streamlit as st
 from google import genai
 
-# 1. 페이지 설정 (가장 첫 줄 필수)
+# set_page_config 중복/순서 에러 방지용 안전 장치
 try:
-  st.set_page_config(page_title="건축기사 RAG AI 학습 시스템", layout="wide")
+    st.set_page_config(page_title="건축기사 RAG AI 학습 시스템", layout="wide")
 except Exception:
-  pass
+    pass
 
-# 2. Streamlit Secrets에서 Gemini API 키 안전하게 불러오기
+# Secrets에서 API 키 로드
 try:
   GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
   st.error("⚠️ Streamlit Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다. 설정 후 다시 시도해주세요.")
   st.stop()
 
-# 최신 구글 제미나이 SDK 클라이언트 초기화
+# 제미나이 클라이언트 초기화
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# 3. ChromaDB 영구 저장소 설정 (서버에 데이터가 날아가지 않고 저장됨)
+# ChromaDB 영구 저장소 설정
 @st.cache_resource
 def init_chroma():
   return chromadb.PersistentClient(path="./chroma_db")
@@ -42,13 +30,12 @@ def init_chroma():
 chroma_client = init_chroma()
 collection = chroma_client.get_or_create_collection(name="architectural_exam_collection")
 
-# 4. Excel 데이터 로드 및 RAG 벡터 DB 적재 함수 (이미지 전처리 및 대단원 재분류 포함)
+# 데이터 로드 함수
 @st.cache_data
 def load_data():
   try:
     raw_df = pd.read_excel('data.xlsx', engine='openpyxl')
   except FileNotFoundError:
-    # 파일이 없을 경우를 대비한 기본 셈플 데이터프레임 반환
     return pd.DataFrame(columns=['대단원', '중단원', '년도', '문제 내용', '모범 답안', '해설', '이미지'])
   
   raw_df.columns = raw_df.columns.str.strip()
@@ -102,7 +89,6 @@ def load_data():
 
   df = pd.DataFrame(processed_rows)
 
-  # 4대 대단원 자동 재분류 적용
   def reclassify_app_units(row):
     text = str(row['문제 내용'])
     old_major = str(row['대단원'])
@@ -123,7 +109,6 @@ def load_data():
 
 df = load_data()
 
-# ChromaDB에 데이터 적재 (최초 1회 또는 비어있을 때)
 def vectorize_data_to_chroma(dataframe):
   if collection.count() == 0 and not dataframe.empty:
     documents = (dataframe['문제 내용'] + " " + dataframe['모범 답안'] + " " + dataframe['해설']).tolist()
@@ -133,7 +118,6 @@ def vectorize_data_to_chroma(dataframe):
 
 vectorize_data_to_chroma(df)
 
-# 점수 추출 헬퍼 함수
 def extract_score(result_text):
     match = re.search(r'(?:최종\s*점수|점수)[\s:]*([0-9]{1,3})점?', result_text)
     if match:
@@ -145,7 +129,7 @@ def extract_score(result_text):
             return val
     return 0
 
-# ==================== [세션 상태 초기화] ====================
+# 세션 상태 초기화
 if 'scope_mode' not in st.session_state:
     st.session_state['scope_mode'] = "🎲 전체 챕터"
 if 'target_weak_major' not in st.session_state:
@@ -156,7 +140,7 @@ if 'selected_major_val' not in st.session_state:
 if 'active_tab_index' not in st.session_state:
     st.session_state['active_tab_index'] = 0
 
-# ==================== [사이드바: 학습 범위 설정] ====================
+# 사이드바 설정
 st.sidebar.markdown("### 🎛️ 공부할 범위 고르기")
 current_mode = st.session_state['scope_mode']
 st.sidebar.markdown(f"현재 학습 모드: **{current_mode}**")
@@ -183,7 +167,6 @@ if st.session_state['scope_mode'] == "🚨 취약 파트 공부" and st.session_
 
 st.sidebar.divider()
 
-# 대상 데이터프레임 필터링
 target_df = pd.DataFrame()
 if df.empty:
     target_df = pd.DataFrame(columns=['대단원', '중단원', '년도', '문제 내용', '모범 답안', '해설', '이미지'])
@@ -195,7 +178,7 @@ elif st.session_state['scope_mode'] == "🚨 취약 파트 공부":
     weak_m = st.session_state['target_weak_major']
     target_df = df[df['대단원'] == weak_m] if weak_m else df
 
-# ==================== [메인 화면 타이틀 및 탭 네비게이션] ====================
+# 메인 화면
 st.title("🏗️ 건축기사 RAG AI 학습 & 채점 시스템")
 st.markdown("딥러닝 임베딩과 **RAG(검색 증강 생성)** 기술을 결합하여 교재 내용을 기반으로 정확하게 정답을 찾고 서술형 답안을 정밀 채점합니다.")
 
@@ -215,7 +198,6 @@ with col_t3:
 
 st.divider()
 
-# 이미지 출력 헬퍼 함수
 def render_question_image(row_data):
     img_path = row_data.get('이미지')
     if img_path and str(img_path).strip() != "":
@@ -228,7 +210,6 @@ def render_question_image(row_data):
             except Exception:
                 pass
 
-# ==================== [탭 1: 한 문제씩 풀기 + RAG 검증 및 추가 질문] ====================
 if st.session_state['active_tab_index'] == 0:
     if st.session_state['scope_mode'] == "🚨 취약 파트 공부":
         st.info(f"🚨 현재 **[{st.session_state['target_weak_major']}]** 파트 집중 공략 모드입니다!")
@@ -258,11 +239,9 @@ if st.session_state['active_tab_index'] == 0:
                 st.warning("답안을 입력해주세요!")
             else:
                 with st.spinner("🔍 RAG 벡터 검색 및 정밀 채점 진행 중..."):
-                    # [RAG 검색 단계] 질문과 가장 유사한 교재 데이터를 Vector DB에서 검색
                     search_results = collection.query(query_texts=[selected_q], n_results=1)
                     retrieved_context = search_results["documents"][0][0] if search_results["documents"] else "관련 정보 없음"
 
-                    # [루브릭 기반 프롬프트]
                     prompt = f"""
                     너는 엄격하고 공정한 건축기사 실기 수석 채점관이야.
                     아래의 [RAG 검색 교재 참고 내용]을 바탕으로 [학생의 답안]을 평가하고 점수를 매겨줘.
@@ -302,7 +281,6 @@ if st.session_state['active_tab_index'] == 0:
                     }
                     st.session_state['messages'] = []
 
-                    # CSV 결과 저장
                     file_name = 'results.csv'
                     file_exists = os.path.isfile(file_name)
                     with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
@@ -350,7 +328,6 @@ if st.session_state['active_tab_index'] == 0:
                     st.markdown(answer_text)
                     st.session_state['messages'].append({"role": "assistant", "content": answer_text})
 
-# ==================== [탭 2: 시험지 모드] ====================
 elif st.session_state['active_tab_index'] == 1:
     st.markdown("#### 📑 지정한 문항 수만큼 무작위로 시험지를 구성하여 한 번에 풀고 RAG 일괄 채점을 받는 모드입니다.")
     
@@ -452,7 +429,6 @@ elif st.session_state['active_tab_index'] == 1:
                         st.markdown(f"**[모범 답안]**\n{res['correct']}")
                         st.markdown(f"**[상세 해설]**\n{res['explanation']}")
 
-# ==================== [탭 3: 학습 분석 & 오답노트] ====================
 elif st.session_state['active_tab_index'] == 2:
     st.header("📈 나의 학습 성적표 및 취약 챕터 분석")
     results_file = 'results.csv'
@@ -508,129 +484,3 @@ elif st.session_state['active_tab_index'] == 2:
             if os.path.isfile(results_file):
                 os.remove(results_file)
                 st.rerun()
-
-# Secrets에서 API 키 로드
-try:
-  GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-except Exception:
-  st.error(
-      "Streamlit Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다. 설정 후"
-      " 다시 시도해주세요."
-  )
-  st.stop()
-
-# 제미나이 클라이언트 초기화
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-
-# ChromaDB 영구 저장소 설정
-@st.cache_resource
-def init_chroma():
-  return chromadb.PersistentClient(path="./chroma_db")
-
-
-chroma_client = init_chroma()
-collection = chroma_client.get_or_create_collection(
-    name="architectural_exam_collection"
-)
-
-
-# 데이터 적재 함수
-def load_and_vectorize_data():
-  if collection.count() == 0:
-    try:
-      df = pd.read_csv("architectural_exam.csv")
-      documents = df["question"] + " " + df["answer"] + " " + df["explanation"]
-      ids = [str(i) for i in range(len(df))]
-      metadatas = df.to_dict(orient="records")
-      collection.add(
-          documents=documents.tolist(), ids=ids, metadatas=metadatas
-      )
-    except Exception:
-      sample_docs = [
-          "철근콘크리트 구조의 피복두께는 철근의 부식을 방지하고 내화를 확보하기 위함이다.",
-          "네트워크 공정표에서 주공정선(Critical Path)은 전체 공사 기간을 결정하는 최장 경로이다.",
-      ]
-      collection.add(
-          documents=sample_docs,
-          ids=["1", "2"],
-          metadatas=[
-              {"question": "피복두께의 목적", "answer": "내화 및 부식 방지"},
-              {
-                  "question": "주공정선의 정의",
-                  "answer": "전체 공사 기간을 결정하는 최장 경로",
-              },
-          ],
-      )
-
-
-load_and_vectorize_data()
-
-# 메인 UI
-st.title("🏗️ 건축기사 실기 RAG 학습 및 자동 채점 시스템")
-st.write(
-    "딥러닝 임베딩과 RAG 기술을 활용하여 기출문제를 검색하고, 객관적인 루브릭에"
-    " 따라 답안을 채점합니다."
-)
-
-menu = st.sidebar.selectbox("선택 메뉴", ["문제 풀기 & AI 채점", "RAG 검색 테스트"])
-
-if menu == "문제 풀기 & AI 채점":
-  st.subheader("📝 주관식 서술형 문제 풀이 및 채점")
-  user_question = st.text_input(
-      "풀고 싶은 문제 키워드나 질문을 입력하세요:", "피복두께의 목적에 대해 쓰시오"
-  )
-  user_answer = st.text_area(
-      "작성한 답안을 입력하세요:",
-      "철근의 부식을 방지하고 내화성을 확보하기 위해서입니다.",
-  )
-
-  if st.button("AI 채점 요청하기"):
-    with st.spinner("RAG로 교재를 검색하고 정밀 채점 중입니다..."):
-      search_results = collection.query(
-          query_texts=[user_question], n_results=1
-      )
-      retrieved_context = (
-          search_results["documents"][0][0]
-          if search_results["documents"]
-          else "관련 정보 없음"
-      )
-
-      prompt = f"""
-            당신은 엄격하고 공정한 건축기사 실기 시험 채점위원입니다.
-            아래의 [참고 교재 내용]을 바탕으로 [학생의 답안]을 평가하고 점수를 매기세요.
-
-            [참고 교재 내용]:
-            {retrieved_context}
-
-            [학생의 질문]: {user_question}
-            [학생의 답안]: {user_answer}
-
-            [채점 루브릭 기준]:
-            - 필수 키워드가 100% 들어가고 설명이 정확하면: 90~100점
-            - 핵심 키워드는 들어갔으나 설명이 미흡하면: 60~80점
-            - 핵심 키워드가 누락되었으나 유사한 개념이면: 30~50점
-            - 완전히 틀렸거나 공란이면: 0점
-
-            반드시 아래 형식으로 출력할 것:
-            1. 점수: (0~100점 사이 숫자만)
-            2. 채점 피드백 및 감점 요인 상세 설명:
-            3. 모범 답안:
-            """
-
-      response = client.models.generate_content(
-          model="gemini-3.6-flash", contents=prompt
-      )
-
-      st.markdown("### 📊 채점 결과")
-      st.write(response.text)
-
-      with st.expander("🔍 RAG 검색에 활용된 교재 원문 확인"):
-        st.write(retrieved_context)
-
-elif menu == "RAG 검색 테스트":
-  st.subheader("🔎 RAG 벡터 검색 검증")
-  query_text = st.text_input("검색할 내용을 입력하세요:", "피복두께")
-  if st.button("문서 검색"):
-    results = collection.query(query_texts=[query_text], n_results=2)
-    st.write("검색된 관련 문서:", results["documents"])
