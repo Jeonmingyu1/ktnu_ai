@@ -32,7 +32,7 @@ collection = chroma_client.get_or_create_collection(
 )
 
 
-# 4. 딥러닝 임베딩(text-embedding-004)을 이용한 데이터 적재
+# 4. 딥러닝 임베딩 안전 적재 함수 (문단별 순차 처리로 에러 방지)
 @st.cache_resource
 def load_and_vectorize_data():
   if collection.count() == 0:
@@ -43,7 +43,6 @@ def load_and_vectorize_data():
       st.error("architectural_exam.csv 파일이 없습니다!")
       st.stop()
 
-    # 실제 CSV 컬럼명인 'question'과 'answer' 사용
     documents = (
         df["question"].fillna("")
         + " "
@@ -54,11 +53,13 @@ def load_and_vectorize_data():
     ids = [str(i) for i in range(len(df))]
     metadatas = df.to_dict(orient="records")
 
-    # 구글 공식 딥러닝 임베딩 모델(text-embedding-004)로 벡터 추출
-    response = client.models.embed_content(
-        model="text-embedding-004", contents=documents
-    )
-    embeddings = [e.values for e in response.embeddings]
+    # 💡 에러 방지를 위해 하나씩 안전하게 딥러닝 임베딩 추출
+    embeddings = []
+    for doc in documents:
+      response = client.models.embed_content(
+          model="text-embedding-004", contents=doc
+      )
+      embeddings.append(response.embeddings[0].values)
 
     # ChromaDB에 임베딩 벡터 저장
     collection.add(
