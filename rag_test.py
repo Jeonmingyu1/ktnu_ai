@@ -130,7 +130,7 @@ if menu == "문제 풀기 & AI 채점":
 
       # 최신 gemini 클라이언트를 이용한 답변 생성
       response = client.models.generate_content(
-          model="gemini-2.5-flash",  # 또는 gemini-1.5-pro
+          model="gemini-3.6-flash",  # 또는 gemini-1.5-pro
           contents=prompt,
       )
 
