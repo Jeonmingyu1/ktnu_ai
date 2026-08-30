@@ -19,7 +19,7 @@ except Exception:
   st.error("⚠️ Streamlit Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다. 설정 후 다시 시도해주세요.")
   st.stop()
 
-# 제미나이 클라이언트 초기화
+# 제미나이 클라이언트 초기화 (gemini-3.6-flash 적용)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ChromaDB 영구 저장소 설정
@@ -30,13 +30,13 @@ def init_chroma():
 chroma_client = init_chroma()
 collection = chroma_client.get_or_create_collection(name="architectural_exam_collection")
 
-# 데이터 로드 함수
+# 데이터 로드 함수 (architectural_exam.csv 대응)
 @st.cache_data
 def load_data():
   try:
-    raw_df = pd.read_excel('data.xlsx', engine='openpyxl')
+    raw_df = pd.read_csv('architectural_exam.csv', encoding='utf-8-sig')
   except FileNotFoundError:
-    return pd.DataFrame(columns=['대단원', '중단원', '년도', '문제 내용', '모범 답안', '해설', '이미지'])
+    return pd.DataFrame(columns=['id', 'category', 'question', 'answer', 'score'])
   
   raw_df.columns = raw_df.columns.str.strip()
   
@@ -49,70 +49,32 @@ def load_data():
     return s
 
   processed_rows = []
-  i = 0
-  while i < len(raw_df):
-    row = raw_df.iloc[i]
-    q_text = clean_val(row.get('문제 내용'))
-    major = clean_val(row.get('대단원'))
+  for _, row in raw_df.iterrows():
+    q_id = clean_val(row.get('id'))
+    category = clean_val(row.get('category'))
+    question = clean_val(row.get('question'))
+    answer = clean_val(row.get('answer'))
+    score = row.get('score', 3)
     
-    if major == "" and q_text == "":
-        i += 1
+    if question == "":
         continue
         
-    middle = clean_val(row.get('중단원'))
-    year = clean_val(row.get('년도'))
-    correct = clean_val(row.get('모범 답안'))
-    explanation = clean_val(row.get('해설'))
-    
-    img_path = None
-    if i + 1 < len(raw_df):
-        next_row = raw_df.iloc[i + 1]
-        next_q_text = clean_val(next_row.get('문제 내용'))
-        next_major = clean_val(next_row.get('대단원'))
-        next_middle = clean_val(next_row.get('중단원'))
-        
-        if next_major == "" and next_middle == "" and \
-           any(ext in next_q_text.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', 'images/']):
-            img_path = next_q_text
-            i += 1
-            
     processed_rows.append({
-        '대단원': major,
-        '중단원': middle,
-        '년도': year,
-        '문제 내용': q_text,
-        '모범 답안': correct,
-        '해설': explanation,
-        '이미지': img_path
+        'id': q_id,
+        'category': category,
+        'question': question,
+        'answer': answer,
+        'score': score
     })
-    i += 1
 
-  df = pd.DataFrame(processed_rows)
-
-  def reclassify_app_units(row):
-    text = str(row['문제 내용'])
-    old_major = str(row['대단원'])
-    old_middle = str(row['중단원'])
-    combined = old_major + " " + old_middle + " " + text
-    
-    if any(k in combined for k in ['공정', '네트워크', 'CPM', '공정표', 'VE', '가치공학', '선행작업', '후행작업']):
-        return '공정관리'
-    elif any(k in combined for k in ['적산', '견적', '수량', '단가', '공사비', '물량산출']):
-        return '건축적산'
-    elif any(k in combined for k in ['구조역학', '모멘트', '단면2차', '응력', '보의', '하중', '처짐', '철근콘크리트 구조', '철골구조', '내진', '휨모멘트']):
-        return '건축구조'
-    else:
-        return '건축시공'
-
-  df['대단원'] = df.apply(reclassify_app_units, axis=1)
-  return df
+  return pd.DataFrame(processed_rows)
 
 df = load_data()
 
 def vectorize_data_to_chroma(dataframe):
   if collection.count() == 0 and not dataframe.empty:
-    documents = (dataframe['문제 내용'] + " " + dataframe['모범 답안'] + " " + dataframe['해설']).tolist()
-    ids = [str(i) for i in range(len(dataframe))]
+    documents = (dataframe['question'] + " " + dataframe['answer']).tolist()
+    ids = dataframe['id'].astype(str).tolist()
     metadatas = dataframe.fillna("").to_dict(orient="records")
     collection.add(documents=documents, ids=ids, metadatas=metadatas)
 
@@ -131,12 +93,12 @@ def extract_score(result_text):
 
 # 세션 상태 초기화
 if 'scope_mode' not in st.session_state:
-    st.session_state['scope_mode'] = "🎲 전체 챕터"
-if 'target_weak_major' not in st.session_state:
-    st.session_state['target_weak_major'] = None
-if 'selected_major_val' not in st.session_state:
-    major_unique = df['대단원'].unique().tolist() if not df.empty else []
-    st.session_state['selected_major_val'] = major_unique[0] if major_unique else ""
+    st.session_state['scope_mode'] = "🎲 전체 카테고리"
+if 'target_weak_category' not in st.session_state:
+    st.session_state['target_weak_category'] = None
+if 'selected_category_val' not in st.session_state:
+    cat_unique = df['category'].unique().tolist() if not df.empty else []
+    st.session_state['selected_category_val'] = cat_unique[0] if cat_unique else ""
 if 'active_tab_index' not in st.session_state:
     st.session_state['active_tab_index'] = 0
 
@@ -145,38 +107,38 @@ st.sidebar.markdown("### 🎛️ 공부할 범위 고르기")
 current_mode = st.session_state['scope_mode']
 st.sidebar.markdown(f"현재 학습 모드: **{current_mode}**")
 
-if st.sidebar.button("🎲 전체 챕터로 변경", use_container_width=True):
-    st.session_state['scope_mode'] = "🎲 전체 챕터"
-    st.session_state['target_weak_major'] = None
+if st.sidebar.button("🎲 전체 카테고리로 변경", use_container_width=True):
+    st.session_state['scope_mode'] = "🎲 전체 카테고리"
+    st.session_state['target_weak_category'] = None
     if 'batch_exam_df' in st.session_state:
         del st.session_state['batch_exam_df']
     st.rerun()
 
-major_list = df['대단원'].unique().tolist() if not df.empty else ['건축시공', '공정관리', '건축적산', '건축구조']
-selected_major_sb = st.sidebar.selectbox("📚 챕터별 학습 (대단원 선택)", major_list)
-if st.sidebar.button("📚 선택한 챕터로 공부 시작", use_container_width=True):
-    st.session_state['scope_mode'] = "📚 챕터별 학습"
-    st.session_state['selected_major_val'] = selected_major_sb
-    st.session_state['target_weak_major'] = None
+category_list = df['category'].unique().tolist() if not df.empty else ['철근콘크리트', '강구조', '공정관리']
+selected_cat_sb = st.sidebar.selectbox("📚 카테고리별 학습", category_list)
+if st.sidebar.button("📚 선택한 카테고리로 공부 시작", use_container_width=True):
+    st.session_state['scope_mode'] = "📚 카테고리별 학습"
+    st.session_state['selected_category_val'] = selected_cat_sb
+    st.session_state['target_weak_category'] = None
     if 'batch_exam_df' in st.session_state:
         del st.session_state['batch_exam_df']
     st.rerun()
 
-if st.session_state['scope_mode'] == "🚨 취약 파트 공부" and st.session_state['target_weak_major']:
-    st.sidebar.warning(f"🚨 **집중 공략 중인 파트:**\n\n**{st.session_state['target_weak_major']}**")
+if st.session_state['scope_mode'] == "🚨 취약 파트 공부" and st.session_state['target_weak_category']:
+    st.sidebar.warning(f"🚨 **집중 공략 중인 파트:**\n\n**{st.session_state['target_weak_category']}**")
 
 st.sidebar.divider()
 
 target_df = pd.DataFrame()
 if df.empty:
-    target_df = pd.DataFrame(columns=['대단원', '중단원', '년도', '문제 내용', '모범 답안', '해설', '이미지'])
-elif st.session_state['scope_mode'] == "🎲 전체 챕터":
+    target_df = pd.DataFrame(columns=['id', 'category', 'question', 'answer', 'score'])
+elif st.session_state['scope_mode'] == "🎲 전체 카테고리":
     target_df = df
-elif st.session_state['scope_mode'] == "📚 챕터별 학습":
-    target_df = df[df['대단원'] == st.session_state['selected_major_val']]
+elif st.session_state['scope_mode'] == "📚 카테고리별 학습":
+    target_df = df[df['category'] == st.session_state['selected_category_val']]
 elif st.session_state['scope_mode'] == "🚨 취약 파트 공부":
-    weak_m = st.session_state['target_weak_major']
-    target_df = df[df['대단원'] == weak_m] if weak_m else df
+    weak_m = st.session_state['target_weak_category']
+    target_df = df[df['category'] == weak_m] if weak_m else df
 
 # 메인 화면
 st.title("🏗️ 건축기사 RAG AI 학습 & 채점 시스템")
@@ -198,39 +160,25 @@ with col_t3:
 
 st.divider()
 
-def render_question_image(row_data):
-    img_path = row_data.get('이미지')
-    if img_path and str(img_path).strip() != "":
-        path_str = str(img_path).strip()
-        if os.path.exists(path_str):
-            st.image(path_str, caption="[문제 참고 그림]", width=500)
-        else:
-            try:
-                st.image(path_str, caption="[문제 참고 그림]", width=500)
-            except Exception:
-                pass
-
 if st.session_state['active_tab_index'] == 0:
     if st.session_state['scope_mode'] == "🚨 취약 파트 공부":
-        st.info(f"🚨 현재 **[{st.session_state['target_weak_major']}]** 파트 집중 공략 모드입니다!")
+        st.info(f"🚨 현재 **[{st.session_state['target_weak_category']}]** 파트 집중 공략 모드입니다!")
     else:
         st.markdown("#### 💡 한 문제씩 풀면서 RAG로 교재를 검색하고 즉시 채점 및 추가 질의를 할 수 있는 모드입니다.")
     
-    q_list = target_df['문제 내용'].tolist() if not target_df.empty else []
+    q_list = target_df['question'].tolist() if not target_df.empty else []
     if not q_list:
-        st.warning("⚠️ 'data.xlsx' 파일이 없거나 선택된 범위에 문제가 없습니다. data.xlsx 파일을 프로젝트 폴더에 넣어주세요.")
+        st.warning("⚠️ 선택된 범위에 문제가 없습니다.")
     else:
         selected_q = st.selectbox("📌 풀고 싶은 문제를 선택하세요:", q_list, key="single_q_select")
-        row_data = target_df[target_df['문제 내용'] == selected_q].iloc[0]
+        row_data = target_df[target_df['question'] == selected_q].iloc[0]
         
-        correct_answer = row_data['모범 답안']
-        explanation = row_data['해설']
-        question_year = row_data.get('년도', '정보 없음')
-        q_major = row_data['대단원']
-        q_sub = row_data['중단원']
+        correct_answer = row_data['answer']
+        q_id = row_data['id']
+        q_cat = row_data['category']
+        q_score = row_data['score']
 
-        st.info(f"**[출제정보] 연도: {question_year}  |  대단원: {q_major}  |  중단원: {q_sub}**\n\n{selected_q}")
-        render_question_image(row_data)
+        st.info(f"**[출제정보] ID: {q_id}  |  카테고리: {q_cat}  |  기본배점: {q_score}점**\n\n{selected_q}")
 
         user_ans = st.text_area("✍️ 정답을 서술형으로 입력하세요:", height=120, key="single_user_ans")
 
@@ -251,10 +199,9 @@ if st.session_state['active_tab_index'] == 0:
 
                     [출제 문제]: {selected_q}
                     [모범 답안]: {correct_answer}
-                    [상세 해설]: {explanation}
                     [학생 답안]: {user_ans}
                     
-                    * 주의: 수식을 쓸 때 \\times, \\text 같은 LaTeX 문법은 절대 쓰지 말고 x, *, m^3 형태의 일반 텍스트만 사용하세요.
+                    * 주의: 수식을 쓸 때 \\times, \\text 같은 LaTeX 문법은 절대 쓰지 말고 일반 텍스트만 사용하세요.
                     
                     핵심 키워드 포함 여부를 엄격히 평가하여 0~100점의 점수를 부여하고 피드백을 작성할 것.
                     반드시 아래 형식으로 출력할 것:
@@ -276,7 +223,6 @@ if st.session_state['active_tab_index'] == 0:
                         "score": score,
                         "result_text": result_text,
                         "correct_answer": correct_answer,
-                        "explanation": explanation,
                         "retrieved_context": retrieved_context
                     }
                     st.session_state['messages'] = []
@@ -286,8 +232,8 @@ if st.session_state['active_tab_index'] == 0:
                     with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
                         writer = csv.writer(f)
                         if not file_exists:
-                            writer.writerow(['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과'])
-                        writer.writerow([selected_q, q_major, q_sub, question_year, user_ans, score, result_text.replace('\n', ' ')])
+                            writer.writerow(['ID', '카테고리', '선택한문제', '학생답안', '점수', 'AI채점결과'])
+                        writer.writerow([q_id, q_cat, selected_q, user_ans, score, result_text.replace('\n', ' ')])
                     st.success("채점 완료 및 오답노트 저장 완료!")
 
         if 'last_graded' in st.session_state and st.session_state['last_graded']['question'] == selected_q:
@@ -298,7 +244,6 @@ if st.session_state['active_tab_index'] == 0:
             st.markdown(lg['result_text'])
             
             st.success(f"**📖 모범 답안**\n\n{lg['correct_answer']}")
-            st.info(f"**💡 상세 해설**\n\n{lg['explanation']}")
             
             with st.expander("🔍 [RAG 시스템] 검색된 교재 원문 확인하기"):
                 st.write(lg['retrieved_context'])
@@ -319,7 +264,7 @@ if st.session_state['active_tab_index'] == 0:
 
             with st.chat_message("assistant"):
                 with st.spinner("답변 생성 중..."):
-                    chat_history_text = f"너는 건축기사 수석 강사야. 현재 문제: '{selected_q}', 모범답안: '{correct_answer}', 해설: '{explanation}'\n 학생 질문: {chat_input}"
+                    chat_history_text = f"너는 건축기사 수석 강사야. 현재 문제: '{selected_q}', 모범답안: '{correct_answer}'\n 학생 질문: {chat_input}"
                     chat_response = client.models.generate_content(
                         model="gemini-3.6-flash",
                         contents=chat_history_text
@@ -352,18 +297,14 @@ elif st.session_state['active_tab_index'] == 1:
 
         user_answers_dict = {}
         for idx, row in exam_df.iterrows():
-            q_year = row.get('년도', '정보 없음')
-            st.markdown(f"**Q{idx+1}. [{q_year} | {row['대단원']} > {row['중단원']}] {row['문제 내용']}**")
-            render_question_image(row)
+            st.markdown(f"**Q{idx+1}. [{row['category']}] {row['question']}**")
 
             ans = st.text_area(f"답안 입력 (문항 {idx+1})", key=f"batch_ans_{idx}", height=90)
             user_answers_dict[idx] = {
-                "question": row['문제 내용'],
-                "major": row['대단원'],
-                "sub": row['중단원'],
-                "year": q_year,
-                "correct": row['모범 답안'],
-                "explanation": row['해설'],
+                "id": row['id'],
+                "category": row['category'],
+                "question": row['question'],
+                "correct": row['answer'],
                 "user_ans": ans
             }
             st.markdown("---")
@@ -410,16 +351,15 @@ elif st.session_state['active_tab_index'] == 1:
                         "user_ans": data['user_ans'], 
                         "score": score, 
                         "result": res_text,
-                        "correct": data['correct'],
-                        "explanation": data['explanation']
+                        "correct": data['correct']
                     })
                     
                     with open(file_name, mode='a', newline='', encoding='utf-8-sig') as f:
                         writer = csv.writer(f)
                         if not file_exists:
-                            writer.writerow(['선택한문제', '대단원', '중단원', '년도', '학생답안', '점수', 'AI채점결과'])
+                            writer.writerow(['ID', '카테고리', '선택한문제', '학생답안', '점수', 'AI채점결과'])
                             file_exists = True
-                        writer.writerow([data['question'], data['major'], data['sub'], data['year'], data['user_ans'], score, res_text.replace('\n', ' ')])
+                        writer.writerow([data['id'], data['category'], data['question'], data['user_ans'], score, res_text.replace('\n', ' ')])
 
                 st.success("🎉 일괄 채점이 완료되었습니다!")
                 for res in batch_results:
@@ -427,18 +367,17 @@ elif st.session_state['active_tab_index'] == 1:
                         st.markdown(f"**내 답안:** {res['user_ans']}")
                         st.markdown(f"**채점 결과:**\n{res['result']}")
                         st.markdown(f"**[모범 답안]**\n{res['correct']}")
-                        st.markdown(f"**[상세 해설]**\n{res['explanation']}")
 
 elif st.session_state['active_tab_index'] == 2:
-    st.header("📈 나의 학습 성적표 및 취약 챕터 분석")
+    st.header("📈 나의 학습 성적표 및 취약 카테고리 분석")
     results_file = 'results.csv'
     
     if not os.path.isfile(results_file):
         st.info("💡 아직 저장된 학습 기록이 없습니다. 문제를 풀고 채점해 보세요!")
     else:
         res_df = pd.read_csv(results_file, encoding='utf-8-sig')
-        if '대단원' not in res_df.columns:
-            res_df['대단원'] = '건축시공'
+        if '카테고리' not in res_df.columns:
+            res_df['카테고리'] = '철근콘크리트'
 
         total = len(res_df)
         avg = res_df['점수'].mean() if total > 0 else 0
@@ -449,27 +388,27 @@ elif st.session_state['active_tab_index'] == 2:
         c3.metric("학습 상태", "🎯 합격권" if avg >= 60 else "⚠️ 보완 필요")
         
         st.divider()
-        st.subheader("🚨 파트별 성적 분석 및 취약 파트 집중 공략 추천")
-        major_stats = res_df.groupby('대단원').agg(
+        st.subheader("🚨 카테고리별 성적 분석 및 취약 파트 집중 공략 추천")
+        cat_stats = res_df.groupby('카테고리').agg(
             평균점수=('점수', 'mean'),
             풀이횟수=('점수', 'count')
         ).reset_index()
         
-        weak_majors = major_stats.sort_values(by='평균점수', ascending=True)
+        weak_cats = cat_stats.sort_values(by='평균점수', ascending=True)
         
-        if not weak_majors.empty:
+        if not weak_cats.empty:
             st.markdown("👇 점수가 낮게 나온 파트의 **[🎯 집중 공략]** 버튼을 누르면 해당 파트만 집중 학습할 수 있습니다!")
-            for idx, row in weak_majors.head(5).iterrows():
-                major_name = row['대단원']
+            for idx, row in weak_cats.head(5).iterrows():
+                cat_name = row['카테고리']
                 avg_s = row['평균점수']
                 count = row['풀이횟수']
                 
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
-                    st.markdown(f"- 📂 **파트: [{major_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
+                    st.markdown(f"- 📂 **카테고리: [{cat_name}]** (풀이: {count}회, 평균 점수: **{avg_s:.1f}점**)")
                 with col_btn:
                     if st.button(f"🎯 집중 공략", key=f"focus_btn_{idx}", type="primary"):
-                        st.session_state['target_weak_major'] = major_name
+                        st.session_state['target_weak_category'] = cat_name
                         st.session_state['scope_mode'] = "🚨 취약 파트 공부"
                         st.session_state['active_tab_index'] = 0 
                         if 'batch_exam_df' in st.session_state:
