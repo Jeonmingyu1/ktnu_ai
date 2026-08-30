@@ -4,10 +4,13 @@ import pandas as pd
 import streamlit as st
 from google import genai
 
-# [필수] 다른 어떤 코드보다 가장 첫 줄에 위치해야 합니다.
-st.set_page_config(
-    page_title="건축기사 RAG 학습 및 채점 시스템", page_layout="wide"
-)
+# set_page_config 중복/순서 에러 방지용 안전 장치
+try:
+  st.set_page_config(
+      page_title="건축기사 RAG 학습 및 채점 시스템", page_layout="wide"
+  )
+except Exception:
+  pass
 
 # Secrets에서 API 키 로드
 try:
